@@ -14,6 +14,7 @@
          add_trailers/2,
          set_trailers/2,
          code_to_status/1,
+         unary_error/3,
          error/2,
          ctx/1,
          ctx/2,
@@ -407,12 +408,18 @@ unary_reply(Message, Ctx) ->
     #state{handler=Pid} = from_ctx(Ctx),
     h2_stream:call(Pid, {unary_reply, Message}).
 
+unary_error(Status, Message, Ctx) ->
+    #state{handler=Pid} = from_ctx(Ctx),
+    h2_stream:call(Pid, {grpc_error, {Status, Message}}).
+
 handle_call(ctx, State=#state{ctx=Ctx}) ->
     {ok, Ctx, State};
 handle_call({ctx, Ctx}, State) ->
     {ok, ok, State#state{ctx=Ctx}};
 handle_call({unary_reply, Message}, State) ->
-    {ok, ok, end_stream(send(false, Message, State))}.
+    {ok, ok, end_stream(send(false, Message, State))};
+handle_call({grpc_error, {Status, Message}}, State) ->
+    {ok, ok, end_stream(Status, Message, State)}.
 
 handle_info({add_headers, Headers}, State) ->
     update_headers(Headers, State);
