@@ -377,7 +377,8 @@ unary_reply(Message, Ctx) ->
     #state{handler=Pid} = from_ctx(Ctx),
     h2_stream:call(Pid, {unary_reply, Message}).
 
-unary_error(Status, Message, #state{handler=Pid}) ->
+unary_error(Status, Message, Ctx) ->
+    #state{handler=Pid} = from_ctx(Ctx),
     h2_stream:call(Pid, {grpc_error, {Status, Message}}).
 
 handle_call(ctx, State=#state{ctx=Ctx}) ->
