@@ -84,6 +84,8 @@ unary_handler(Ctx, Channel, Path, Input, Def, Options) ->
                         case recv_trailers(S) of
                             {ok, {<<"0">>, _, Metadata}} ->
                                 {ok, Data} = recv_data(S, 0),
+                                %% Garbage the stream
+                                h2_connection:get_response(Pid, Stream),
                                 {ok, Data, #{headers => Headers,
                                              trailers => Metadata}};
                             {ok, {Status, Message, _Metadata}} ->
