@@ -71,7 +71,7 @@ unary(Ctx, Path, Input, Def, Options) ->
 unary_handler(Ctx, Channel, Path, Input, Def, Options) ->
     try
         case grpcbox_client_stream:send_request(Ctx, Channel, Path, Input, Def, Options) of
-            {ok, Conn, Stream, Pid} ->
+            {ok, _Conn, Stream, Pid} ->
                 Ref = erlang:monitor(process, Pid),
                 S = #{channel => Channel,
                       stream_id => Stream,
@@ -86,8 +86,6 @@ unary_handler(Ctx, Channel, Path, Input, Def, Options) ->
                                     {ok, {<<"0">>, _, Metadata}} ->
                                         case recv_data(S, 0) of
                                             {ok, Data} ->
-                                                %% Garbage the stream
-                                                %h2_connection:get_response(Conn, Stream),
                                                 {ok, Data, #{headers => Headers,
                                                              trailers => Metadata}};
                                             stream_finished ->
