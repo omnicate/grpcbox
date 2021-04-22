@@ -11,8 +11,10 @@
 
 groups() ->
     [{ssl, [], [unary_authenticated]},
-     {tcp, [], [unary_no_auth, multiple_servers]},
-     {negative_tests, [], [unimplemented, closed_stream]},
+     {tcp, [], [unary_no_auth, multiple_servers,
+                unary_garbage_collect_streams]},
+     {concurrent, [{repeat_until_any_fail, 5}], [unary_concurrent]},
+     {negative_tests, [], [unimplemented, closed_stream, generate_error, streaming_generate_error]},
      {negative_ssl, [], [unauthorized]},
      {context, [], [%% deadline
                    ]}].
@@ -20,6 +22,7 @@ groups() ->
 all() ->
     [{group, ssl},
      {group, tcp},
+     {group, concurrent},
      {group, negative_tests},
      {group, negative_ssl},
      initially_down_service,
@@ -29,6 +32,7 @@ all() ->
      stream_interceptor,
      bidirectional,
      client_stream,
+     client_stream_garbage_collect_streams,
      compression,
      stats_handler,
      server_latency_stats,
@@ -63,6 +67,15 @@ init_per_group(ssl, Config) ->
     application:ensure_all_started(grpcbox),
     Config;
 init_per_group(tcp, Config) ->
+    application:set_env(grpcbox, client, #{channels => [{default_channel, [{http, "localhost", 8080, []}],
+                                                         #{}}]}),
+    application:set_env(grpcbox, servers, [#{grpc_opts => #{service_protos => [route_guide_pb],
+                                                            services => #{'routeguide.RouteGuide' =>
+                                                                              routeguide_route_guide}},
+                                             transport_opts => #{}}]),
+    application:ensure_all_started(grpcbox),
+    Config;
+init_per_group(concurrent, Config) ->
     application:set_env(grpcbox, client, #{channels => [{default_channel, [{http, "localhost", 8080, []}],
                                                          #{}}]}),
     application:set_env(grpcbox, servers, [#{grpc_opts => #{service_protos => [route_guide_pb],
@@ -198,6 +211,14 @@ init_per_testcase(client_stream, Config) ->
                                           services => #{'routeguide.RouteGuide' => routeguide_route_guide}}}]),
     application:ensure_all_started(grpcbox),
     Config;
+init_per_testcase(client_stream_garbage_collect_streams, Config) ->
+    application:set_env(grpcbox, client, #{channels => [{default_channel,
+                                                         [{http, "localhost", 8080, []}], #{}}]}),
+    application:set_env(grpcbox, servers,
+                        [#{grpc_opts => #{service_protos => [route_guide_pb],
+                                          services => #{'routeguide.RouteGuide' => routeguide_route_guide}}}]),
+    application:ensure_all_started(grpcbox),
+    Config;
 init_per_testcase(compression, Config) ->
     application:set_env(grpcbox, client, #{channels => [{default_channel,
                                                          [{http, "localhost", 8080, []}], #{}}]}),
@@ -289,9 +310,17 @@ end_per_testcase(unary_no_auth, _Config) ->
     ok;
 end_per_testcase(multiple_servers, _Config) ->
     ok;
+end_per_testcase(unary_garbage_collect_streams, _Config) ->
+    ok;
+end_per_testcase(unary_concurrent, _Config) ->
+    ok;
 end_per_testcase(unimplemented, _Config) ->
     ok;
 end_per_testcase(unauthorized, _Config) ->
+    ok;
+end_per_testcase(generate_error, _Config) ->
+    ok;
+end_per_testcase(streaming_generate_error, _Config) ->
     ok;
 end_per_testcase(closed_stream, _Config) ->
     ok;
@@ -314,16 +343,32 @@ unimplemented(_Config) ->
     Def = #grpcbox_def{service = 'routeguide.RouteGuide',
                        marshal_fun = fun(I) -> route_guide_pb:encode_msg(I, point) end,
                        unmarshal_fun = fun(I) -> route_guide_pb:encode_msg(I, feature) end},
-    ?assertMatch({error, {?GRPC_STATUS_UNIMPLEMENTED, _}},
+    ?assertMatch({error, {?GRPC_STATUS_UNIMPLEMENTED, _}, #{headers := #{}, trailers := #{}}},
                  grpcbox_client:unary(ctx:new(), <<"/routeguide.RouteGuide/NotReal">>, #{}, Def, #{})),
 
     {ok, S} = grpcbox_client:stream(ctx:new(), <<"/routeguide.RouteGuide/NotReal">>, #{}, Def, #{}),
-    ?assertMatch({error, {?GRPC_STATUS_UNIMPLEMENTED, _}}, grpcbox_client:recv_data(S)).
+    ?assertMatch({error, {?GRPC_STATUS_UNIMPLEMENTED, _}, #{trailers := #{}}},
+                 grpcbox_client:recv_data(S)).
 
 unauthorized(_Config) ->
     Point = #{latitude => 409146138, longitude => -746188906},
     Ctx = ctx:new(),
-    {error, {?GRPC_STATUS_UNAUTHENTICATED, _}} = routeguide_route_guide_client:get_feature(Ctx, Point).
+    {error, {?GRPC_STATUS_UNAUTHENTICATED, _}, #{headers := #{}, trailers := #{}}}
+        = routeguide_route_guide_client:get_feature(Ctx, Point).
+
+generate_error(_Config) ->
+    Response = routeguide_route_guide_client:generate_error(#{}),
+    ?assertMatch({error, {?GRPC_STATUS_INTERNAL, <<"error_message">>}, _}, Response),
+    {error, _, #{trailers := Trailers}} = Response,
+    ?assertEqual(<<"error_trailer">>, maps:get(<<"generate_error_trailer">>, Trailers, undefined)).
+
+streaming_generate_error(_Config) ->
+    {ok, Stream} = routeguide_route_guide_client:streaming_generate_error(#{}),
+    ?assertMatch({ok, #{<<":status">> := <<"200">>}}, grpcbox_client:recv_headers(Stream)),
+    Response = grpcbox_client:recv_data(Stream),
+    ?assertMatch({error, {?GRPC_STATUS_INTERNAL, <<"error_message">>}, _}, Response),
+    {error, _, #{trailers := Trailers}} = Response,
+    ?assertEqual(<<"error_trailer">>, maps:get(<<"generate_error_trailer">>, Trailers, undefined)).
 
 closed_stream(_Config) ->
     {ok, S} = routeguide_route_guide_client:record_route(ctx:new()),
@@ -409,6 +454,8 @@ reflection_service(_Config) ->
                              #{file_descriptor_proto := [_]}}}},
                  grpcbox_client:recv_data(S)),
 
+    check_stream_state(S),
+
     %% closes the stream, waits for an 'end of stream' message and then returns the received data
     ?assertMatch(ok, grpcbox_client:close_send(S)).
 
@@ -491,6 +538,21 @@ unary_no_auth(_Config) ->
 unary_authenticated(Config) ->
     unary(Config).
 
+%% checks that no closed streams are left around after unary requests
+unary_garbage_collect_streams(Config) ->
+    unary(Config),
+
+    ConnectionStreamSet = connection_stream_set(),
+
+    ?assertEqual([], h2_stream_set:my_active_streams(ConnectionStreamSet)).
+
+client_stream_garbage_collect_streams(Config) ->
+    client_stream(Config),
+
+    ConnectionStreamSet = connection_stream_set(),
+
+    ?assertEqual([], h2_stream_set:my_active_streams(ConnectionStreamSet)).
+
 multiple_servers(_Config) ->
     application:set_env(grpcbox, client, #{channels => [{default_channel, [{http, "localhost", 8080, []},
                                                                            {http, "localhost", 8081, []}]},
@@ -501,6 +563,26 @@ multiple_servers(_Config) ->
     unary(_Config),
     unary(_Config).
 
+unary_concurrent(Config) ->
+    Nrs = lists:seq(1,100),
+    ParentPid = self(),
+    Pids = [spawn_link(fun() ->
+                               unary(Config),
+                               ParentPid ! self()
+                       end) || _ <- Nrs],
+    unary_concurrent_wait_for_processes(Pids).
+
+unary_concurrent_wait_for_processes([]) ->
+    ok;
+unary_concurrent_wait_for_processes(Pids) ->
+    receive
+        Pid ->
+            NewPids = lists:delete(Pid, Pids),
+            unary_concurrent_wait_for_processes(NewPids)
+    after 5000 ->
+            ?assertMatch([], Pids, "Unary concurrency test timed out without receiving all responses")
+    end.
+
 bidirectional(_Config) ->
     {ok, S} = routeguide_route_guide_client:route_chat(ctx:new()),
     %% send 2 before receiving since the server only sends what it already had in its list of messages for the
@@ -509,6 +591,8 @@ bidirectional(_Config) ->
     ok = grpcbox_client:send(S, #{location => #{latitude => 1, longitude => 1}, message => <<"hello there">>}),
     ?assertMatch({ok, #{message := <<"hello there">>}}, grpcbox_client:recv_data(S)),
     ok = grpcbox_client:send(S, #{location => #{latitude => 1, longitude => 1}, message => <<"hello there">>}),
+
+    check_stream_state(S),
 
     %% closes the stream, waits for an 'end of stream' message and then returns the received data
     ?assertMatch(ok, grpcbox_client:close_send(S)).
@@ -575,6 +659,22 @@ stream_interceptor(_Config) ->
     ?assertMatch({ok, {_, _, #{<<"x-grpc-stream-interceptor">> := <<"true">>}}}, grpcbox_client:recv_trailers(Stream)).
 
 %%
+
+%% verify that the chatterbox stream isn't storing frame data
+check_stream_state(S) ->
+    {_, StreamState} = sys:get_state(maps:get(stream_pid, S)),
+    FrameQueue = element(6, StreamState),
+    ?assert(queue:is_empty(FrameQueue)).
+
+%% return the stream_set of a connection in the channel
+connection_stream_set() ->
+    {ok, {Channel, _}} = grpcbox_channel:pick(default_channel, unary),
+    {ok, Conn, _} = grpcbox_subchannel:conn(Channel),
+    {connected, ConnState} = sys:get_state(Conn),
+
+    %% I know, I know, this will fail if the connection record in h2_connection ever has elements
+    %% added before the stream_set field. But for now, it is 14 and thats good enough.
+    element(14, ConnState).
 
 cert_dir(Config) ->
     DataDir = ?config(data_dir, Config),
