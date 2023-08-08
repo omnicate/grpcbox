@@ -300,8 +300,8 @@ handle_unary(Ctx, Message, State=#state{unary_interceptor=UnaryInterceptor,
 on_end_stream(State) ->
     on_end_stream_(State).
 
-on_end_stream_(#state{async_unary=true}) ->
-    ok;
+on_end_stream_(State=#state{async_unary=true}) ->
+    {ok, State};
 on_end_stream_(State=#state{input_ref=Ref,
                             callback_pid=Pid,
                             method=#method{input={_Input, true},
