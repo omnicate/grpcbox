@@ -417,9 +417,11 @@ handle_call(ctx, State=#state{ctx=Ctx}) ->
 handle_call({ctx, Ctx}, State) ->
     {ok, ok, State#state{ctx=Ctx}};
 handle_call({unary_reply, Message}, State) ->
-    {ok, ok, end_stream(send(false, Message, State))};
+    {ok, State1} = end_stream(send(false, Message, State)),
+    {ok, ok, State1};
 handle_call({grpc_error, {Status, Message}}, State) ->
-    {ok, ok, end_stream(Status, Message, State)}.
+    {ok, State1} = end_stream(Status, Message, State),
+    {ok, ok, State1}.
 
 handle_info({add_headers, Headers}, State) ->
     update_headers(Headers, State);
