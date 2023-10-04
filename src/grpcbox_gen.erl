@@ -60,7 +60,8 @@ gen_service_def(Service, ProtoModule, GrpcConfig, FullOutDir) ->
     }.
 
 template(Template, Service, OutDir) ->
-    TemplateFileName = "/home/mikael/work/git/loltel/terminators/erlang/_build/default/plugins/grpcbox_plugin/priv/" ++ Template ++ ".erl",
+    LibDir = os:getenv("ERL_LIBS"),
+    TemplateFileName = filename:join([LibDir, "grpcbox", "priv", Template ++ ".erl"]),
     {ok, TemplateFile} = file:read_file(TemplateFileName),
     Data = bbmustache:render(TemplateFile, maps:to_list(Service), [{key_type, atom}, {escape_fun, fun(X) -> X end}]),
     [TemplateSuffix|_] = lists:reverse(string:split(Template, "_", all)),
