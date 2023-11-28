@@ -17,7 +17,7 @@ compile_pb(Filename, GpbOpts, OutDir) ->
             proplists:get_value(module_name_suffix, GpbOpts, "")
         ]
     ),
-    gpb_compile:file(Filename, [
+    ok = gpb_compile:file(Filename, [
         {rename, {msg_name, snake_case}},
         use_packages,
         maps,
