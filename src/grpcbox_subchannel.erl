@@ -117,7 +117,7 @@ options(http, Options) ->
 ping_pong(Conn) ->
     h2_client:send_ping(Conn),
         receive
-            {'PONG', Conn} ->
+            {'PONG', _} ->
             timer:sleep(timer:seconds(10)),
             ping_pong(Conn)
     after 100 ->
