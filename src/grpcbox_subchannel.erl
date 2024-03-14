@@ -122,6 +122,7 @@ ping_pong(Conn) ->
             ping_pong(Conn)
     after 100 ->
         ?LOG_ERROR("missing pong ~p", [Conn]),
+        h2_client:stop(Conn),
         exit(missing_pong)
     end.
 
