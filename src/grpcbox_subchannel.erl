@@ -133,12 +133,12 @@ terminate(Reason, _State, #data{conn_pid=Pid,
 connect(Data=#data{conn=undefined,
                    endpoint={Transport, Host, Port, SSLOptions, ConnectionSettings}}, From, Actions) ->
     case h2_client:start_link(Transport, Host, Port, options(Transport, SSLOptions),
-                             #{garbage_on_end => true,
-                               stream_callback_mod => grpcbox_client_stream}) of
+                             ConnectionSettings#{garbage_on_end => true,
+                                                 stream_callback_mod => grpcbox_client_stream}) of
         {ok, Conn} ->
             Pid = h2_stream_set:connection(Conn),
-            spawn_link(fun() -> ping_pong(Pid) end),
-            {next_state, ready, Data#data{conn=Pid}, Actions};
+            spawn_link(fun() -> ping_pong(Conn) end),
+            {next_state, ready, Data#data{conn=Conn, conn_pid=Pid}, Actions};
         {error, _}=Error ->
             {next_state, disconnected, Data#data{conn=undefined}, [{reply, From, Error}]}
     end;
