@@ -8,11 +8,13 @@
 
 -export([send/2,
          send/3,
+         unary_reply/2,
          send_headers/2,
          add_headers/2,
          add_trailers/2,
          set_trailers/2,
          code_to_status/1,
+         unary_error/3,
          error/2,
          ctx/1,
          ctx/2,
@@ -54,6 +56,7 @@
                 resp_trailers=[]    :: list(),
                 headers_sent=false  :: boolean(),
                 trailers_sent=false :: boolean(),
+                async_unary=false   :: boolean(),
                 unary_interceptor   :: fun() | undefined,
                 stream_interceptor  :: fun() | undefined,
                 stream_id           :: stream_id(),
@@ -286,6 +289,8 @@ handle_unary(Ctx, Message, State=#state{unary_interceptor=UnaryInterceptor,
         {ok, Response, Ctx2} ->
             State1 = from_ctx(Ctx2),
             send(false, Response, State1);
+        {noreply, Ctx2} ->
+            (from_ctx(Ctx2))#state{async_unary=true};
         E={grpc_error, _} ->
             throw(E);
         E={grpc_extended_error, _} ->
@@ -295,6 +300,8 @@ handle_unary(Ctx, Message, State=#state{unary_interceptor=UnaryInterceptor,
 on_end_stream(State) ->
     on_end_stream_(State).
 
+on_end_stream_(State=#state{async_unary=true}) ->
+    {ok, State};
 on_end_stream_(State=#state{input_ref=Ref,
                             callback_pid=Pid,
                             method=#method{input={_Input, true},
@@ -397,10 +404,22 @@ ctx(#state{handler=Pid}) ->
 ctx(#state{handler=Pid}, Ctx) ->
     h2_stream:call(Pid, {ctx, Ctx}).
 
+unary_reply(Message, Ctx) ->
+    #state{handler=Pid} = from_ctx(Ctx),
+    h2_stream:call(Pid, {unary_reply, Message}).
+
+unary_error(Status, Message, Ctx) ->
+    #state{handler=Pid} = from_ctx(Ctx),
+    h2_stream:call(Pid, {grpc_error, {Status, Message}}).
+
 handle_call(ctx, State=#state{ctx=Ctx}) ->
     {ok, Ctx, State};
 handle_call({ctx, Ctx}, State) ->
-    {ok, ok, State#state{ctx=Ctx}}.
+    {ok, ok, State#state{ctx=Ctx}};
+handle_call({unary_reply, Message}, State) ->
+    {ok, ok, end_stream(send(false, Message, State))};
+handle_call({grpc_error, {Status, Message}}, State) ->
+    {ok, ok, end_stream(Status, Message, State)}.
 
 handle_info({add_headers, Headers}, State) ->
     update_headers(Headers, State);
