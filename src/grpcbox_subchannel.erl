@@ -2,6 +2,8 @@
 
 -behaviour(gen_statem).
 
+-include_lib("kernel/include/logger.hrl").
+
 -export([start_link/5,
          conn/1,
          conn/2,
@@ -131,11 +133,12 @@ terminate(Reason, _State, #data{conn_pid=Pid,
 connect(Data=#data{conn=undefined,
                    endpoint={Transport, Host, Port, SSLOptions, ConnectionSettings}}, From, Actions) ->
     case h2_client:start_link(Transport, Host, Port, options(Transport, SSLOptions),
-                              ConnectionSettings#{garbage_on_end => true,
-                                                  stream_callback_mod => grpcbox_client_stream}) of
+                             #{garbage_on_end => true,
+                               stream_callback_mod => grpcbox_client_stream}) of
         {ok, Conn} ->
             Pid = h2_stream_set:connection(Conn),
-            {next_state, ready, Data#data{conn=Conn, conn_pid=Pid}, Actions};
+            spawn_link(fun() -> ping_pong(Pid) end),
+            {next_state, ready, Data#data{conn=Pid}, Actions};
         {error, _}=Error ->
             {next_state, disconnected, Data#data{conn=undefined}, [{reply, From, Error}]}
     end;
@@ -147,3 +150,16 @@ options(https, Options) ->
     [{client_preferred_next_protocols, {client, [<<"h2">>]}} | Options];
 options(http, Options) ->
     Options.
+
+%% Keep alive
+ping_pong(Conn) ->
+    h2_client:send_ping(Conn),
+        receive
+            {'PONG', _} ->
+            timer:sleep(timer:seconds(10)),
+            ping_pong(Conn)
+    after 100 ->
+        ?LOG_ERROR("missing pong ~p", [Conn]),
+        h2_client:stop(Conn),
+        exit(missing_pong)
+    end.
