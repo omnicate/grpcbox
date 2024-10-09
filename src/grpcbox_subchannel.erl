@@ -137,7 +137,7 @@ connect(Data=#data{conn=undefined,
                                                  stream_callback_mod => grpcbox_client_stream}) of
         {ok, Conn} ->
             Pid = h2_stream_set:connection(Conn),
-            spawn_link(fun() -> ping_pong(Conn) end),
+            spawn_link(fun() -> ping_pong(Conn, ConnectionSettings) end),
             {next_state, ready, Data#data{conn=Conn, conn_pid=Pid}, Actions};
         {error, _}=Error ->
             {next_state, disconnected, Data#data{conn=undefined}, [{reply, From, Error}]}
@@ -152,13 +152,14 @@ options(http, Options) ->
     Options.
 
 %% Keep alive
-ping_pong(Conn) ->
+ping_pong(Conn, ConnectionSettings) ->
+    Timeout = maps:get(keep_alive_timeout, ConnectionSettings, 100),
     h2_client:send_ping(Conn),
         receive
             {'PONG', _} ->
             timer:sleep(timer:seconds(10)),
-            ping_pong(Conn)
-    after 100 ->
+            ping_pong(Conn, ConnectionSettings)
+    after Timeout ->
         ?LOG_ERROR("missing pong ~p", [Conn]),
         h2_client:stop(Conn),
         exit(missing_pong)
