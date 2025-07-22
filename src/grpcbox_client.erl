@@ -225,6 +225,13 @@ recv(Type, #{stream_id := Id,
                     {error, unknown}
             end
     after Timeout ->
+            %% Kill the stream process to prevent resource leaks
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    h2_stream:stop(Pid);
+                false ->
+                    ok
+            end,
             {error, timeout}
     end.
 
@@ -251,6 +258,13 @@ recv_end(#{stream_id := StreamId,
         {'DOWN', Ref, process, Pid, Reason} ->
             {error, {stream_down, Reason}}
     after Timeout ->
+            %% Kill the stream process to prevent resource leaks
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    h2_stream:stop(Pid);
+                false ->
+                    ok
+            end,
             {error, timeout}
     end.
 
