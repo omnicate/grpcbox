@@ -22,8 +22,8 @@
 -type transport() :: http | https.
 -type host() :: inet:ip_address() | inet:hostname().
 -type connection_settings() :: map().
--type endpoint() :: {transport(), host(), inet:port_number(), [ssl:ssl_options()]} |
-                    {transport(), host(), inet:port_number(), [ssl:ssl_options()], connection_settings()}.
+-type endpoint() :: {transport(), host(), inet:port_number(), [ssl:client_option()]} |
+                    {transport(), host(), inet:port_number(), [ssl:client_option()], connection_settings()}.
 
 -type options() :: #{balancer => load_balancer(),
                      encoding => gprcbox:encoding(),
