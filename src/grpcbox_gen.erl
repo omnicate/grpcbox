@@ -1,11 +1,14 @@
 -module(grpcbox_gen).
 
 -export([
-    from_proto/2
+    from_proto/2,
+    from_proto/3
 ]).
 
 from_proto(Proto, OutDir) ->
-    GpbOpts = [{module_name_suffix, "_pb"}],
+    from_proto(Proto, [{module_name_suffix, "_pb"}], OutDir).
+
+from_proto(Proto, GpbOpts, OutDir) ->
     Module = compile_pb(Proto, GpbOpts, OutDir),
     gen_services(Module, GpbOpts, OutDir).
 
